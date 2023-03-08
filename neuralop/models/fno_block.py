@@ -180,6 +180,28 @@ def get_contract_fun(weight, implementation="reconstructed", separable=False):
         raise ValueError(
             f'Got {implementation=}, expected "reconstructed" or "factorized"'
         )
+    
+
+class FactorizedTensor(nn.Layer):
+    def __init__(self, shape, init_scale):
+        super().__init__()
+        self.shape = shape
+        self.init_scale = init_scale
+        self.real = self.create_parameter(
+            shape=shape, default_initializer=nn.initializer.Uniform(-init_scale, init_scale)
+        )
+        self.imag = self.create_parameter(
+            shape=shape, default_initializer=nn.initializer.Uniform(-init_scale, init_scale)
+        )
+    
+    def __repr__(self):
+        return f"FactorizedTensor(shape={self.shape})"
+     
+    
+    @property
+    def data(self):
+        # return paddle.complex(self.real, self.imag)
+        return self.real + 1j * self.imag
 
 
 class FactorizedSpectralConv(nn.Layer):
@@ -298,24 +320,32 @@ class FactorizedSpectralConv(nn.Layer):
             )
             # self.weight.normal_(0, scale)
         else:
+            # self.weight = nn.LayerList(
+            #     [
+            #         # FactorizedTensor.new(
+            #         #     weight_shape,
+            #         #     rank=self.rank,
+            #         #     factorization=factorization,
+            #         #     fixed_rank_modes=fixed_rank_modes,
+            #         #     **decomposition_kwargs,
+            #         # )
+            #         # paddle.create_parameter(shape = weight_shape, dtype="float32")
+            #         paddle.randn(shape=weight_shape)
+            #         for _ in range((2 ** (self.order - 1)) * n_layers)
+            #     ]
+            # )
+            # self.weight = [
+            #     paddle.randn(shape=weight_shape, dtype="float32") * scale
+            #     for _ in range((2 ** (self.order - 1)) * n_layers)
+            # ]
             self.weight = nn.LayerList(
-                [
-                    # FactorizedTensor.new(
-                    #     weight_shape,
-                    #     rank=self.rank,
-                    #     factorization=factorization,
-                    #     fixed_rank_modes=fixed_rank_modes,
-                    #     **decomposition_kwargs,
-                    # )
-                    paddle.create_parameter(shape = weight_shape, dtype="float32")
-                    for _ in range((2 ** (self.order - 1)) * n_layers)
-                ]
+                [FactorizedTensor(weight_shape, init_scale=scale) for _ in range((2 ** (self.order - 1)) * n_layers)]
             )
-            for w in self.weight:
-                w.normal_(0, scale)
+            # for w in self.weight:
+            #     w.normal_(0, scale)
 
         self._contract = get_contract_fun(
-            self.weight[0], implementation=implementation, separable=separable
+            self.weight[0].data, implementation=implementation, separable=separable
         )
 
         if bias:
@@ -348,12 +378,11 @@ class FactorizedSpectralConv(nn.Layer):
         # Compute Fourier coeffcients
         fft_dims = list(range(-self.order, 0))
         # x = torch.fft.rfftn(x.float(), norm=self.fft_norm, dim=fft_dims)
-        x = paddle.fft.rfftn(x.float(), norm=self.fft_norm, axes=fft_dims)
+        x = paddle.fft.rfftn(x, norm=self.fft_norm, axes=fft_dims)
 
         # out_fft = torch.zeros([batchsize, self.out_channels, *fft_size], device=x.device, dtype=torch.cfloat)
         out_fft = paddle.zeros(
             [batchsize, self.out_channels, *fft_size],
-            device=x.device,
             dtype=paddle.complex64,
         )
 
@@ -366,11 +395,24 @@ class FactorizedSpectralConv(nn.Layer):
         for i, boundaries in enumerate(itertools.product(*mode_indexing)):
             # Keep all modes for first 2 modes (batch-size and channels)
             idx_tuple = [slice(None), slice(None)] + [slice(*b) for b in boundaries]
+            # idx_tuple = [:, :, ]
 
             # For 2D: [:, :, :height, :width] and [:, :, -height:, width]
-            out_fft[idx_tuple] = self._contract(
-                x[idx_tuple], self.weight[indices + i], separable=self.separable
-            )
+            # import pdb; pdb.set_trace()
+            # out_fft[idx_tuple] = self._contract(
+            #     x[idx_tuple], self.weight[indices + i].data, separable=self.separable
+            # )
+            if len(idx_tuple) == 4:
+                out_fft[idx_tuple[0], idx_tuple[1], idx_tuple[2], idx_tuple[3]] = self._contract(
+                    x[idx_tuple[0], idx_tuple[1], idx_tuple[2], idx_tuple[3]], self.weight[indices + i].data, separable=self.separable
+                )
+            elif len(idx_tuple) == 3:
+                out_fft[idx_tuple[0], idx_tuple[1], idx_tuple[2]] = self._contract(
+                    x[idx_tuple[0], idx_tuple[1], idx_tuple[2]], self.weight[indices + i].data, separable=self.separable
+                )
+            else:
+                raise ValueError("Not implemented")
+
 
         # x = torch.fft.irfftn(out_fft, s=(mode_sizes), norm=self.fft_norm)
         x = paddle.fft.irfftn(out_fft, s=(mode_sizes), norm=self.fft_norm)
@@ -460,7 +502,6 @@ class FactorizedSpectralConv1d(FactorizedSpectralConv):
         # out_fft = torch.zeros([batchsize, self.out_channels,  width//2 + 1], device=x.device, dtype=torch.cfloat)
         out_fft = paddle.zeros(
             [batchsize, self.out_channels, width // 2 + 1],
-            device=x.device,
             dtype=paddle.complex64,
         )
         out_fft[:, :, : self.half_modes_height] = self._contract(
@@ -526,7 +567,6 @@ class FactorizedSpectralConv2d(FactorizedSpectralConv):
         out_fft = paddle.zeros(
             [batchsize, self.out_channels, height, width // 2 + 1],
             dtype=x.dtype,
-            device=x.device,
         )
 
         # upper block (truncate high freq)
@@ -546,7 +586,10 @@ class FactorizedSpectralConv2d(FactorizedSpectralConv):
             separable=self.separable,
         )
 
-        x = torch.fft.irfft2(
+        # x = torch.fft.irfft2(
+        #     out_fft, s=(height, width), dim=(-2, -1), norm=self.fft_norm
+        # )
+        x = paddle.fft.irfft2(
             out_fft, s=(height, width), dim=(-2, -1), norm=self.fft_norm
         )
 
@@ -611,7 +654,6 @@ class FactorizedSpectralConv3d(FactorizedSpectralConv):
         # )
         out_fft = paddle.zeros(
             [batchsize, self.out_channels, height, width, depth // 2 + 1],
-            device=x.device,
             dtype="complex64",
         )
 

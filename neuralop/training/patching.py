@@ -1,11 +1,13 @@
-import torch
-import math 
-from torch import nn
-from neuralop.mpu.mappings import gather_from_model_parallel_region, scatter_to_model_parallel_region
-import neuralop.mpu.comm as comm
+import math
+import paddle
+import paddle.nn as nn
+# import torch
+# from torch import nn
+# from neuralop.mpu.mappings import gather_from_model_parallel_region, scatter_to_model_parallel_region
+# import neuralop.mpu.comm as comm
 
 
-class MultigridPatching2D(nn.Module):
+class MultigridPatching2D(nn.Layer):
     def __init__(self, model, levels=0, padding_fraction=0, use_distributed=False, stitching=True):
         """Wraps a model inside a multi-grid patching
         """
@@ -33,22 +35,23 @@ class MultigridPatching2D(nn.Module):
             print(f'MGPatching({self.n_patches=}, {self.padding_fraction=}, {self.levels=}, {use_distributed=}, {stitching=})')
         
         #If distributed patches are stiched, re-scale gradients to revert DDP averaging 
-        if self.use_distributed and self.stitching:
-            for param in model.parameters():
-                param.register_hook(lambda grad: grad * float(comm.get_model_parallel_size())) 
+        # TODO: I removed support for distributed training. Should add back
+        # if self.use_distributed and self.stitching:
+        #     for param in model.parameters():
+        #         param.register_hook(lambda grad: grad * float(comm.get_model_parallel_size())) 
 
     def patch(self, x, y):
         #If not stitching, scatter truth, otherwise keep on every GPU
-        if self.use_distributed and not self.stitching:
-            y = make_patches(y, n=self.n_patches, p=0)
-            y = scatter_to_model_parallel_region(y, 0)
+        # if self.use_distributed and not self.stitching:
+        #     y = make_patches(y, n=self.n_patches, p=0)
+        #     y = scatter_to_model_parallel_region(y, 0)
 
         #Create padded patches in batch dimension (identity if levels=0)
         x = self._make_mg_patches(x)
 
         #Split data across processes
-        if self.use_distributed:
-            x = scatter_to_model_parallel_region(x, 0)
+        # if self.use_distributed:
+        #     x = scatter_to_model_parallel_region(x, 0)
         
         return x, y
 
@@ -63,10 +66,10 @@ class MultigridPatching2D(nn.Module):
             x = self._unpad(x)
 
         #Gather patches if they are to be stiched back together
-        if self.use_distributed and self.stitching:
-            x = gather_from_model_parallel_region(x, dim=0)
-        else:
-            x = x
+        # if self.use_distributed and self.stitching:
+        #     x = gather_from_model_parallel_region(x, dim=0)
+        # else:
+        #     x = x
 
         #Stich patches or patch the truth if output left unstitched
         if self.stitching or evaluation:
@@ -129,17 +132,24 @@ class MultigridPatching2D(nn.Module):
 
             if s2_pad > x_sub.size(-1):
                 diff = s2_pad - x_sub.size(-1)
-                x_sub = torch.nn.functional.pad(x_sub, pad=[x_sub.size(-1), x_sub.size(-1), 0, 0], mode='circular')
-                x_sub = torch.nn.functional.pad(x_sub, pad=[diff, diff, 0, 0], mode='circular')
+                # x_sub = torch.nn.functional.pad(x_sub, pad=[x_sub.size(-1), x_sub.size(-1), 0, 0], mode='circular')
+                x_sub = paddle.nn.functional.pad(x_sub, pad=[x_sub.size(-1), x_sub.size(-1), 0, 0], mode='circular')
+                # x_sub = torch.nn.functional.pad(x_sub, pad=[diff, diff, 0, 0], mode='circular')
+                x_sub = paddle.nn.functional.pad(x_sub, pad=[diff, diff, 0, 0], mode='circular')
             else:
-                x_sub = torch.nn.functional.pad(x_sub, pad=[s2_pad, s2_pad, 0, 0], mode='circular')
+                # x_sub = torch.nn.functional.pad(x_sub, pad=[s2_pad, s2_pad, 0, 0], mode='circular')
+                x_sub = paddle.nn.functional.pad(x_sub, pad=[s2_pad, s2_pad, 0, 0], mode='circular')
             
             if s1_pad > x_sub.size(-2):
                 diff = s1_pad - x_sub.size(-2)
-                x_sub = torch.nn.functional.pad(x_sub, pad=[0, 0, x_sub.size(-2), x_sub.size(-2)], mode='circular')
-                x_sub = torch.nn.functional.pad(x_sub, pad=[0, 0, diff, diff], mode='circular')
+                # x_sub = torch.nn.functional.pad(x_sub, pad=[0, 0, x_sub.size(-2), x_sub.size(-2)], mode='circular')
+                # x_sub = torch.nn.functional.pad(x_sub, pad=[0, 0, diff, diff], mode='circular')
+                x_sub = paddle.nn.functional.pad(x_sub, pad=[0, 0, x_sub.size(-2), x_sub.size(-2)], mode='circular')
+                x_sub = paddle.nn.functional.pad(x_sub, pad=[0, 0, diff, diff], mode='circular')
+
             else:
-                x_sub = torch.nn.functional.pad(x_sub, pad=[0, 0, s1_pad, s1_pad], mode='circular')
+                # x_sub = torch.nn.functional.pad(x_sub, pad=[0, 0, s1_pad, s1_pad], mode='circular')
+                x_sub = paddle.nn.functional.pad(x_sub, pad=[0, 0, s1_pad, s1_pad], mode='circular')
 
             x_sub = x_sub.unfold(-1, s2_patched + 2*padding[1], s2_stride)
             x_sub = x_sub.unfold(-3, s1_patched + 2*padding[0], s1_stride)
@@ -148,7 +158,8 @@ class MultigridPatching2D(nn.Module):
             x_sub = x_sub.reshape(patched.size(0), s2_patched + 2*padding[1], s1_patched + 2*padding[0], -1)
             x_sub = x_sub.permute(0,3,2,1)
 
-            patched = torch.cat((patched, x_sub), 1)
+            # patched = torch.cat((patched, x_sub), 1)
+            patched = paddle.concat((patched, x_sub), 1)
         
         return patched
 
@@ -176,9 +187,11 @@ def make_patches(x, n, p=0):
     #Pad
     if p[0] > 0 or p[1] > 0:
         if d == 1:
-            x = torch.nn.functional.pad(x, pad=p, mode='circular')
+            # x = torch.nn.functional.pad(x, pad=p, mode='circular')
+            x = paddle.nn.functional.pad(x, pad=p, mode='circular')
         else:
-            x = torch.nn.functional.pad(x, pad=[p[1], p[1], p[0], p[0]], mode='circular')
+            # x = torch.nn.functional.pad(x, pad=[p[1], p[1], p[0], p[0]], mode='circular')
+            x = paddle.nn.functional.pad(x, pad=[p[1], p[1], p[0], p[0]], mode='circular')
     
     if isinstance(n, int):
         n = [n, n]

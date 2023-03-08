@@ -33,7 +33,10 @@ class PositionalEmbedding:
 
     def __call__(self, data):
         x, y = self.grid(data)
-        x, y = x.squeeze(self.channel_dim), y.squeeze(self.channel_dim)
+        # x, y = x.squeeze(self.channel_dim), y.squeeze(self.channel_dim)
+        x = x.squeeze(self.channel_dim)
+        y = y.squeeze(self.channel_dim)
+        # use fluid dygraph guard
         return paddle.concat((data, x, y), axis=0)
 
 
