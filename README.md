@@ -2,7 +2,7 @@
 
 本项目旨在用PaddlePaddle复现Fourier Neural Operator 一文^[1].
 
-[^1]: Zongyi Li, Nikola B. Kovachki, Kamyar Azizzadenesheli, Burigede Liu, Kaushik Bhattacharya, Andrew M. Stuart, & Animashree Anandkumar (2020). Fourier Neural Operator for Parametric Partial Differential Equations arXiv: Learning.
+> [1]: Zongyi Li, Nikola B. Kovachki, Kamyar Azizzadenesheli, Burigede Liu, Kaushik Bhattacharya, Andrew M. Stuart, & Animashree Anandkumar (2020). Fourier Neural Operator for Parametric Partial Differential Equations arXiv: Learning.
 
 这篇文章提出了一种新的神经算子模型——傅里叶神经算子，用于求解参数化的偏微分方程。与其他的用深度学习求解PDE的论文最大的不同在于，傅里叶神经算子直接在傅里叶空间中对积分核进行参数化，使得模型更加高效且具有更强的表达能力。此外，该模型还能够在零样本超分辨率方面取得卓越的表现。相对于传统的PDE求解器，傅里叶神经算子的速度提升了三个数量级，并且在固定分辨率下具有更高的准确性。
 
