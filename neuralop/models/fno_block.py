@@ -638,7 +638,9 @@ class FactorizedSpectralConv3d(FactorizedSpectralConv):
 
     def forward(self, x, indices=0):
         batchsize, channels, height, width, depth = x.shape
-        x = paddle.fft.rfftn(x, norm=self.fft_norm, dim=[-3, -2, -1])
+
+        x_float = paddle.cast(x, dtype="float32")
+        x = paddle.fft.rfftn(x_float, norm=self.fft_norm, dim=[-3, -2, -1])
         out_fft = paddle.zeros(
             [batchsize, self.out_channels, height, width, depth // 2 + 1],
             dtype="complex64",

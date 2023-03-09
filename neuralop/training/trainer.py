@@ -121,7 +121,8 @@ class Trainer:
                     out = output_encoder.decode(out)
                     y = output_encoder.decode(y)
                     
-                loss = training_loss(out, y)
+                out_float = paddle.cast(out, dtype="float32")
+                loss = training_loss(out_float, y)
 
                 if regularizer:
                     loss += regularizer.loss

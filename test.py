@@ -63,7 +63,7 @@ from neuralop import LpLoss, H1Loss
 
 # %%
 model = TFNO(n_modes=(16, 16), hidden_channels=32, projection_channels=64)
-model.load_dict(paddle.load('model.pdparams'))
+model.load_dict(paddle.load('model_trained.pdparams'))
 n_params = count_params(model)
 # print model summary
 print(model)
