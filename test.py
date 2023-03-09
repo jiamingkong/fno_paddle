@@ -28,29 +28,6 @@ y = data['y'] # [1, 16, 16]
 print(f'Training sample have shape {x.shape[1:]}')
 
 
-# Which sample to view
-# index = 0
-
-# data = train_dataset[index]
-# x = data['x']
-# y = data['y']
-# fig = plt.figure(figsize=(7, 7))
-# ax = fig.add_subplot(2, 2, 1)
-# ax.imshow(x[0], cmap='gray')
-# ax.set_title('input x')
-# ax = fig.add_subplot(2, 2, 2)
-# ax.imshow(y.squeeze())
-# ax.set_title('input y')
-# ax = fig.add_subplot(2, 2, 3)
-# ax.imshow(x[1])
-# ax.set_title('x: 1st pos embedding')
-# ax = fig.add_subplot(2, 2, 4)
-# ax.imshow(x[2])
-# ax.set_title('x: 2nd pos embedding')
-# fig.suptitle('Visualizing one input sample', y=0.98)
-# plt.tight_layout()
-# fig.show()
-
 # %%
 import paddle
 import matplotlib.pyplot as plt
@@ -70,12 +47,11 @@ print(model)
 print(f'\nOur model has {n_params} parameters.')
 sys.stdout.flush()
 
-print(model(paddle.randn((1, 3, 16, 16))))
 # %%
-optimizer = paddle.optimizer.Adam(learning_rate=5e-5 , parameters=model.parameters())
+optimizer = paddle.optimizer.Adam(learning_rate=1e-4 , parameters=model.parameters())
 
 # cosine annealing scheduler
-scheduler = paddle.optimizer.lr.CosineAnnealingDecay(learning_rate=5e-5, T_max=1000)
+scheduler = paddle.optimizer.lr.CosineAnnealingDecay(learning_rate=1e-4, T_max=1000)
 
 loss = LpLoss(d=2, p=2)
 h1_loss = H1Loss(d=2)
@@ -93,7 +69,7 @@ sys.stdout.flush()
 
 
 
-trainer = Trainer(model, n_epochs=100,
+trainer = Trainer(model, n_epochs=10,
                   mg_patching_levels=0,
                   wandb_log=False,
                   log_test_interval=3,
@@ -108,8 +84,6 @@ trainer.train(train_loader, test_loaders,
               regularizer=False, 
               training_loss=train_loss,
               eval_losses=eval_losses)
-
-import pdb; pdb.set_trace()
 
 test_samples = test_loaders[32].dataset
 

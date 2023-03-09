@@ -102,12 +102,8 @@ class Trainer:
             train_err = 0.0
             for sample in train_loader:
                 x, y = sample['x'], sample['y']
-                
                 x, y = self.patcher.patch(x, y)
-                # x = x.to(self.device)
-                # y = y.to(self.device)
 
-                # optimizer.zero_grad(set_to_none=True)
                 optimizer.clear_grad()
                 if regularizer:
                     regularizer.reset()
