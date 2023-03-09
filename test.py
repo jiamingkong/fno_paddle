@@ -63,7 +63,7 @@ from neuralop import LpLoss, H1Loss
 
 # %%
 model = TFNO(n_modes=(16, 16), hidden_channels=32, projection_channels=64)
-
+model.load_dict(paddle.load('model.pdparams'))
 n_params = count_params(model)
 # print model summary
 print(model)
@@ -72,10 +72,10 @@ sys.stdout.flush()
 
 print(model(paddle.randn((1, 3, 16, 16))))
 # %%
-optimizer = paddle.optimizer.Adam(learning_rate=8e-3, parameters=model.parameters())
+optimizer = paddle.optimizer.Adam(learning_rate=5e-5 , parameters=model.parameters())
 
 # cosine annealing scheduler
-scheduler = paddle.optimizer.lr.CosineAnnealingDecay(learning_rate=8e-3, T_max=1000)
+scheduler = paddle.optimizer.lr.CosineAnnealingDecay(learning_rate=5e-5, T_max=1000)
 
 loss = LpLoss(d=2, p=2)
 h1_loss = H1Loss(d=2)
@@ -108,3 +108,47 @@ trainer.train(train_loader, test_loaders,
               regularizer=False, 
               training_loss=train_loss,
               eval_losses=eval_losses)
+
+import pdb; pdb.set_trace()
+
+test_samples = test_loaders[32].dataset
+
+fig = plt.figure(figsize=(7, 7))
+for index in range(3):
+    data = test_samples[index]
+    # Input x
+    x = data['x']
+    # Ground-truth
+    y = data['y']
+    # Model prediction
+    out = model(x.unsqueeze(0).cuda()).cpu()
+
+    ax = fig.add_subplot(3, 3, index*3 + 1)
+    ax.imshow(x[0], cmap='gray')
+    if index == 0:
+        ax.set_title('Input x')
+    plt.xticks([], [])
+    plt.yticks([], [])
+
+    ax = fig.add_subplot(3, 3, index*3 + 2)
+    ax.imshow(y.squeeze())
+    if index == 0:
+        ax.set_title('Ground-truth y')
+    plt.xticks([], [])
+    plt.yticks([], [])
+
+    ax = fig.add_subplot(3, 3, index*3 + 3)
+    ax.imshow(out.squeeze().detach().numpy())
+    if index == 0:
+        ax.set_title('Model prediction')
+    plt.xticks([], [])
+    plt.yticks([], [])
+
+fig.suptitle('Inputs, ground-truth output and prediction.', y=0.98)
+plt.tight_layout()
+fig.show()
+# wait for the plot to show
+input('Press enter to continue...')
+
+# save model
+paddle.save(model.state_dict(), 'model_train_in_paddle.pdparams')

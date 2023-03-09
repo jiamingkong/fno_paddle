@@ -188,10 +188,10 @@ class FactorizedTensor(nn.Layer):
         self.shape = shape
         self.init_scale = init_scale
         self.real = self.create_parameter(
-            shape=shape, default_initializer=nn.initializer.Uniform(-init_scale, init_scale)
+            shape=shape, default_initializer=nn.initializer.XavierNormal()
         )
         self.imag = self.create_parameter(
-            shape=shape, default_initializer=nn.initializer.Uniform(-init_scale, init_scale)
+            shape=shape, default_initializer=nn.initializer.XavierNormal()
         )
     
     def __repr__(self):
@@ -200,7 +200,7 @@ class FactorizedTensor(nn.Layer):
     
     @property
     def data(self):
-        # return paddle.complex(self.real, self.imag)
+        # return paddle.complex(self.real, self.imag) # 甚至梯度都无法回传。
         return self.real + 1j * self.imag
 
 
@@ -377,14 +377,15 @@ class FactorizedSpectralConv(nn.Layer):
 
         # Compute Fourier coeffcients
         fft_dims = list(range(-self.order, 0))
-        # x = torch.fft.rfftn(x.float(), norm=self.fft_norm, dim=fft_dims)
-        x = paddle.fft.rfftn(x, norm=self.fft_norm, axes=fft_dims)
-
-        # out_fft = torch.zeros([batchsize, self.out_channels, *fft_size], device=x.device, dtype=torch.cfloat)
+        
+        # put x back in to real, as in torch x.float()
+        x_float = paddle.cast(x, dtype="float32")
+        x = paddle.fft.rfftn(x_float, norm=self.fft_norm, axes=fft_dims)
+        
         out_fft = paddle.zeros(
             [batchsize, self.out_channels, *fft_size],
             dtype=paddle.complex64,
-        )
+        ) # [1,32,16,9], all zeros, complex
 
         # We contract all corners of the Fourier coefs
         # Except for the last mode: there, we take all coefs as redundant modes were already removed
@@ -413,13 +414,11 @@ class FactorizedSpectralConv(nn.Layer):
             else:
                 raise ValueError("Not implemented")
 
-
-        # x = torch.fft.irfftn(out_fft, s=(mode_sizes), norm=self.fft_norm)
         x = paddle.fft.irfftn(out_fft, s=(mode_sizes), norm=self.fft_norm)
 
         if self.bias is not None:
             x = x + self.bias[indices, ...]
-
+        
         return x
 
     def get_conv(self, indices):
@@ -559,11 +558,10 @@ class FactorizedSpectralConv2d(FactorizedSpectralConv):
     def forward(self, x, indices=0):
         batchsize, channels, height, width = x.shape
 
-        # x = torch.fft.rfft2(x.float(), norm=self.fft_norm)
-        x = paddle.fft.rfft2(x, norm=self.fft_norm)
+        x_float = paddle.cast(x, dtype="float32")
+        x = paddle.fft.rfft2(x_float, norm=self.fft_norm)
 
         # The output will be of size (batch_size, self.out_channels, x.size(-2), x.size(-1)//2 + 1)
-        # out_fft = torch.zeros([batchsize, self.out_channels, height, width//2 + 1], dtype=x.dtype, device=x.device)
         out_fft = paddle.zeros(
             [batchsize, self.out_channels, height, width // 2 + 1],
             dtype=x.dtype,
@@ -586,9 +584,6 @@ class FactorizedSpectralConv2d(FactorizedSpectralConv):
             separable=self.separable,
         )
 
-        # x = torch.fft.irfft2(
-        #     out_fft, s=(height, width), dim=(-2, -1), norm=self.fft_norm
-        # )
         x = paddle.fft.irfft2(
             out_fft, s=(height, width), dim=(-2, -1), norm=self.fft_norm
         )
@@ -643,15 +638,7 @@ class FactorizedSpectralConv3d(FactorizedSpectralConv):
 
     def forward(self, x, indices=0):
         batchsize, channels, height, width, depth = x.shape
-
-        # x = torch.fft.rfftn(x.float(), norm=self.fft_norm, dim=[-3, -2, -1])
         x = paddle.fft.rfftn(x, norm=self.fft_norm, dim=[-3, -2, -1])
-
-        # out_fft = torch.zeros(
-        #     [batchsize, self.out_channels, height, width, depth // 2 + 1],
-        #     device=x.device,
-        #     dtype=torch.cfloat,
-        # )
         out_fft = paddle.zeros(
             [batchsize, self.out_channels, height, width, depth // 2 + 1],
             dtype="complex64",
@@ -726,7 +713,6 @@ class FactorizedSpectralConv3d(FactorizedSpectralConv):
             separable=self.separable,
         )
 
-        # x = torch.fft.irfftn(out_fft, s=(height, width, depth), norm=self.fft_norm)
         x = paddle.fft.irfftn(out_fft, s=(height, width, depth), norm=self.fft_norm)
 
         if self.bias is not None:
