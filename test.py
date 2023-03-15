@@ -40,7 +40,7 @@ from neuralop import LpLoss, H1Loss
 
 # %%
 model = TFNO(n_modes=(16, 16), hidden_channels=32, projection_channels=64)
-model.load_dict(paddle.load('model_trained.pdparams'))
+# model.load_dict(paddle.load('model_trained.pdparams'))
 n_params = count_params(model)
 # print model summary
 print(model)
@@ -48,7 +48,10 @@ print(f'\nOur model has {n_params} parameters.')
 sys.stdout.flush()
 
 # %%
-optimizer = paddle.optimizer.Adam(learning_rate=1e-4 , parameters=model.parameters())
+# optimizer = paddle.optimizer.Adam(learning_rate=1e-4 , parameters=model.parameters())
+# only solving for some parameters
+# optimizer = paddle.optimizer.Adam(learning_rate=1e-4 , parameters=
+#                                   model.projection.parameters())
 
 # cosine annealing scheduler
 scheduler = paddle.optimizer.lr.CosineAnnealingDecay(learning_rate=1e-4, T_max=1000)
@@ -69,7 +72,7 @@ sys.stdout.flush()
 
 
 
-trainer = Trainer(model, n_epochs=10,
+trainer = Trainer(model, n_epochs=100,
                   mg_patching_levels=0,
                   wandb_log=False,
                   log_test_interval=3,

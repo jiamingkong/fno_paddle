@@ -30,7 +30,7 @@ def skip_connection(in_features, out_features, n_dim=2, bias=False, type="soft-g
             in_features=in_features, out_features=out_features, bias=bias, n_dim=n_dim
         )
     elif type.lower() == "linear":
-        return getattr(nn, f"Conv{n_dim}d")(
+        return getattr(nn, f"Conv{n_dim}D")(
             in_channels=in_features, out_channels=out_features, kernel_size=1, bias=bias
         )
     elif type.lower() == "identity":

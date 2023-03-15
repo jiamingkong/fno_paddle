@@ -1,15 +1,6 @@
 import paddle
 import paddle.nn as nn
-
 import itertools
-
-# import tensorly as tl
-# from tensorly.plugins import use_opt_einsum
-# tl.set_backend('pytorch')
-
-# use_opt_einsum('optimal')
-
-# from tltorch.factorized_tensors.core import FactorizedTensor
 
 einsum_symbols = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
@@ -33,12 +24,9 @@ def _contract_dense(x, weight, separable=False):
 
     eq = "".join(x_syms) + "," + "".join(weight_syms) + "->" + "".join(out_syms)
 
-    # if not torch.is_tensor(weight):
-    #     weight = weight.to_tensor()
     if not isinstance(weight, paddle.Tensor):
         weight = paddle.to_tensor(weight)
 
-    # return tl.einsum(eq, x, weight)
     return paddle.einsum(eq, x, weight)
 
 
@@ -200,8 +188,7 @@ class FactorizedTensor(nn.Layer):
     
     @property
     def data(self):
-        # return paddle.complex(self.real, self.imag) # 甚至梯度都无法回传。
-        return self.real + 1j * self.imag
+        return paddle.complex(self.real, self.imag)
 
 
 class FactorizedSpectralConv(nn.Layer):
@@ -320,36 +307,15 @@ class FactorizedSpectralConv(nn.Layer):
             )
             # self.weight.normal_(0, scale)
         else:
-            # self.weight = nn.LayerList(
-            #     [
-            #         # FactorizedTensor.new(
-            #         #     weight_shape,
-            #         #     rank=self.rank,
-            #         #     factorization=factorization,
-            #         #     fixed_rank_modes=fixed_rank_modes,
-            #         #     **decomposition_kwargs,
-            #         # )
-            #         # paddle.create_parameter(shape = weight_shape, dtype="float32")
-            #         paddle.randn(shape=weight_shape)
-            #         for _ in range((2 ** (self.order - 1)) * n_layers)
-            #     ]
-            # )
-            # self.weight = [
-            #     paddle.randn(shape=weight_shape, dtype="float32") * scale
-            #     for _ in range((2 ** (self.order - 1)) * n_layers)
-            # ]
             self.weight = nn.LayerList(
                 [FactorizedTensor(weight_shape, init_scale=scale) for _ in range((2 ** (self.order - 1)) * n_layers)]
             )
-            # for w in self.weight:
-            #     w.normal_(0, scale)
-
+            
         self._contract = get_contract_fun(
             self.weight[0].data, implementation=implementation, separable=separable
         )
 
         if bias:
-            # self.bias = nn.Parameter(scale * torch.randn(*((n_layers, self.out_channels) + (1, )*self.order)))
             self.bias = paddle.create_parameter(
                 shape=((n_layers, self.out_channels) + (1,) * self.order),
                 dtype="float32",
@@ -396,13 +362,7 @@ class FactorizedSpectralConv(nn.Layer):
         for i, boundaries in enumerate(itertools.product(*mode_indexing)):
             # Keep all modes for first 2 modes (batch-size and channels)
             idx_tuple = [slice(None), slice(None)] + [slice(*b) for b in boundaries]
-            # idx_tuple = [:, :, ]
-
-            # For 2D: [:, :, :height, :width] and [:, :, -height:, width]
-            # import pdb; pdb.set_trace()
-            # out_fft[idx_tuple] = self._contract(
-            #     x[idx_tuple], self.weight[indices + i].data, separable=self.separable
-            # )
+            
             if len(idx_tuple) == 4:
                 out_fft[idx_tuple[0], idx_tuple[1], idx_tuple[2], idx_tuple[3]] = self._contract(
                     x[idx_tuple[0], idx_tuple[1], idx_tuple[2], idx_tuple[3]], self.weight[indices + i].data, separable=self.separable
