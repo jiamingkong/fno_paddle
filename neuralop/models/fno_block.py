@@ -23,11 +23,41 @@ def _contract_dense(x, weight, separable=False):
         out_syms[0] = x_syms[0]
 
     eq = "".join(x_syms) + "," + "".join(weight_syms) + "->" + "".join(out_syms)
-
+    # For the darcy flow, the only einsum is abcd,becd->aecd, where x and weights are shaped [32,32,8,8]
     if not isinstance(weight, paddle.Tensor):
         weight = paddle.to_tensor(weight)
 
     return paddle.einsum(eq, x, weight)
+
+
+def _contract_dense_trick(x, weight_real, weight_imag, separable=False):
+    # the same as above function, but do the complex multiplication manually to avoid the einsum bug in paddle
+
+    order = len(x.shape)
+    # batch-size, in_channels, x, y...
+    x_syms = list(einsum_symbols[:order])
+
+    # in_channels, out_channels, x, y...
+    weight_syms = list(x_syms[1:])  # no batch-size
+
+    # batch-size, out_channels, x, y...
+    if separable:
+        out_syms = [x_syms[0]] + list(weight_syms)
+    else:
+        weight_syms.insert(1, einsum_symbols[order])  # outputs
+        out_syms = list(weight_syms)
+        out_syms[0] = x_syms[0]
+
+    eq = "".join(x_syms) + "," + "".join(weight_syms) + "->" + "".join(out_syms)
+
+    o1_real = paddle.einsum(eq, x.real(), weight_real) - paddle.einsum(
+        eq, x.imag(), weight_imag
+    )
+    o1_imag = paddle.einsum(eq, x.imag(), weight_real) + paddle.einsum(
+        eq, x.real(), weight_imag
+    )
+    x = paddle.complex(o1_real, o1_imag)
+    return x
 
 
 def _contract_dense_separable(x, weight, separable=True):
@@ -90,7 +120,7 @@ def _contract_tucker(x, tucker_weight, separable=False):
         + "->"
         + "".join(out_syms)
     )
-    print(eq) # 'abcd,fghi,bf,eg,ch,di->aecd'
+    print(eq)  # 'abcd,fghi,bf,eg,ch,di->aecd'
     # return tl.einsum(eq, x, tucker_weight.core, *tucker_weight.factors)
     return paddle.einsum(eq, x, tucker_weight.core, *tucker_weight.factors)
 
@@ -147,7 +177,7 @@ def get_contract_fun(weight, implementation="reconstructed", separable=False):
         # if torch.is_tensor(weight):
         #     return _contract_dense
         if isinstance(weight, paddle.Tensor):
-            return _contract_dense
+            return _contract_dense_trick
         # TODO: FactorizedTensor not supported yet
         # elif isinstance(weight, FactorizedTensor):
         #     if weight.name.lower() == 'complexdense':
@@ -168,7 +198,7 @@ def get_contract_fun(weight, implementation="reconstructed", separable=False):
         raise ValueError(
             f'Got {implementation=}, expected "reconstructed" or "factorized"'
         )
-    
+
 
 class FactorizedTensor(nn.Layer):
     def __init__(self, shape, init_scale):
@@ -181,11 +211,10 @@ class FactorizedTensor(nn.Layer):
         self.imag = self.create_parameter(
             shape=shape, default_initializer=nn.initializer.XavierNormal()
         )
-    
+
     def __repr__(self):
         return f"FactorizedTensor(shape={self.shape})"
-     
-    
+
     @property
     def data(self):
         return paddle.complex(self.real, self.imag)
@@ -303,14 +332,17 @@ class FactorizedSpectralConv(nn.Layer):
             # )
             self.weight = paddle.create_parameter(
                 shape=((2 ** (self.order - 1)) * n_layers, *weight_shape),
-                dtype="float32"
+                dtype="float32",
             )
             # self.weight.normal_(0, scale)
         else:
             self.weight = nn.LayerList(
-                [FactorizedTensor(weight_shape, init_scale=scale) for _ in range((2 ** (self.order - 1)) * n_layers)]
+                [
+                    FactorizedTensor(weight_shape, init_scale=scale)
+                    for _ in range((2 ** (self.order - 1)) * n_layers)
+                ]
             )
-            
+
         self._contract = get_contract_fun(
             self.weight[0].data, implementation=implementation, separable=separable
         )
@@ -343,15 +375,14 @@ class FactorizedSpectralConv(nn.Layer):
 
         # Compute Fourier coeffcients
         fft_dims = list(range(-self.order, 0))
-        
+
         # put x back in to real, as in torch x.float()
         x_float = paddle.cast(x, dtype="float32")
         x = paddle.fft.rfftn(x_float, norm=self.fft_norm, axes=fft_dims)
-        
+
         out_fft = paddle.zeros(
-            [batchsize, self.out_channels, *fft_size],
-            dtype=paddle.complex64,
-        ) # [1,32,16,9], all zeros, complex
+            [batchsize, self.out_channels, *fft_size], dtype=paddle.complex64,
+        )  # [1,32,16,9], all zeros, complex
 
         # We contract all corners of the Fourier coefs
         # Except for the last mode: there, we take all coefs as redundant modes were already removed
@@ -362,14 +393,22 @@ class FactorizedSpectralConv(nn.Layer):
         for i, boundaries in enumerate(itertools.product(*mode_indexing)):
             # Keep all modes for first 2 modes (batch-size and channels)
             idx_tuple = [slice(None), slice(None)] + [slice(*b) for b in boundaries]
-            
+
             if len(idx_tuple) == 4:
-                out_fft[idx_tuple[0], idx_tuple[1], idx_tuple[2], idx_tuple[3]] = self._contract(
-                    x[idx_tuple[0], idx_tuple[1], idx_tuple[2], idx_tuple[3]], self.weight[indices + i].data, separable=self.separable
+                out_fft[
+                    idx_tuple[0], idx_tuple[1], idx_tuple[2], idx_tuple[3]
+                ] = self._contract(
+                    x[idx_tuple[0], idx_tuple[1], idx_tuple[2], idx_tuple[3]],
+                    self.weight[indices + i].real,
+                    self.weight[indices + i].imag,
+                    separable=self.separable,
                 )
             elif len(idx_tuple) == 3:
                 out_fft[idx_tuple[0], idx_tuple[1], idx_tuple[2]] = self._contract(
-                    x[idx_tuple[0], idx_tuple[1], idx_tuple[2]], self.weight[indices + i].data, separable=self.separable
+                    x[idx_tuple[0], idx_tuple[1], idx_tuple[2]],
+                    self.weight[indices + i].real,
+                    self.weight[indices + i].imag,
+                    separable=self.separable,
                 )
             else:
                 raise ValueError("Not implemented")
@@ -378,7 +417,7 @@ class FactorizedSpectralConv(nn.Layer):
 
         if self.bias is not None:
             x = x + self.bias[indices, ...]
-        
+
         return x
 
     def get_conv(self, indices):
@@ -455,13 +494,10 @@ class FactorizedSpectralConv1d(FactorizedSpectralConv):
     def forward(self, x, indices=0):
         batchsize, channels, width = x.shape
 
-        # x = torch.fft.rfft(x, norm=self.fft_norm)
         x = paddle.fft.rfft(x, norm=self.fft_norm)
 
-        # out_fft = torch.zeros([batchsize, self.out_channels,  width//2 + 1], device=x.device, dtype=torch.cfloat)
         out_fft = paddle.zeros(
-            [batchsize, self.out_channels, width // 2 + 1],
-            dtype=paddle.complex64,
+            [batchsize, self.out_channels, width // 2 + 1], dtype=paddle.complex64,
         )
         out_fft[:, :, : self.half_modes_height] = self._contract(
             x[:, :, : self.half_modes_height],
@@ -469,7 +505,6 @@ class FactorizedSpectralConv1d(FactorizedSpectralConv):
             separable=self.separable,
         )
 
-        # x = torch.fft.irfft(out_fft, n=width, norm=self.fft_norm)
         x = paddle.fft.irfft(out_fft, n=width, norm=self.fft_norm)
 
         if self.bias is not None:
@@ -523,8 +558,7 @@ class FactorizedSpectralConv2d(FactorizedSpectralConv):
 
         # The output will be of size (batch_size, self.out_channels, x.size(-2), x.size(-1)//2 + 1)
         out_fft = paddle.zeros(
-            [batchsize, self.out_channels, height, width // 2 + 1],
-            dtype=x.dtype,
+            [batchsize, self.out_channels, height, width // 2 + 1], dtype=x.dtype,
         )
 
         # upper block (truncate high freq)
@@ -683,7 +717,7 @@ class FactorizedSpectralConv3d(FactorizedSpectralConv):
         return x
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # let x be a complex tensor of size (32, 32, 8, 8)
     x = paddle.randn([32, 32, 8, 8]).astype("complex64")
     # let weight be the same

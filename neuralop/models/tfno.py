@@ -268,7 +268,7 @@ class FNO(nn.Layer):
 
         if self.domain_padding is not None:
             x = self.domain_padding.pad(x)
-        # x is 0.4 * [1, 32, 16, 16], passed
+
         for i in range(self.n_layers):
 
             if self.preactivation:
@@ -304,7 +304,7 @@ class FNO(nn.Layer):
         if self.domain_padding is not None:
             x = self.domain_padding.unpad(x)
         x = self.projection(x)
-        
+
         return x
 
 

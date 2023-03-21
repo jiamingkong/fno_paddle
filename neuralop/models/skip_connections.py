@@ -71,12 +71,14 @@ class SoftGating(nn.Layer):
 
         self.weight = self.create_parameter(
             shape=(1, self.in_features, *(1,) * n_dim),
-            default_initializer=nn.initializer.Constant(1.0),
+            # default_initializer=nn.initializer.Constant(1.0),
+            default_initializer=nn.initializer.Uniform(low=0.0, high=1.0),
         )
         if bias:
             self.bias = self.create_parameter(
                 shape=(1, self.in_features, *(1,) * n_dim),
-                default_initializer=nn.initializer.Constant(1.0),
+                # default_initializer=nn.initializer.Constant(1.0),
+                default_initializer=nn.initializer.Uniform(low=0.0, high=1.0),
             )
         else:
             self.bias = None

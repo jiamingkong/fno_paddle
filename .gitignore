@@ -160,3 +160,5 @@ cython_debug/
 #.idea/
 
 _debugging.py
+model_train_in_paddle.pdparams
+layer_by_layer_debugging.py
